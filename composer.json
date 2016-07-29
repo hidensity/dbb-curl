@@ -1,0 +1,21 @@
+{
+  "name": "dbb-curl/dbb-curl",
+  "description": "PHP class as an object oriented wrapper of PHP's cURL extension",
+  "minimum-stability": "dev",
+  "license": "none",
+  "authors": [
+    {
+      "name": "Dennis Barzen",
+      "email": "dennis.barzen@nu3.de"
+    }
+  ],
+  "require": {
+    "php": ">= 5.3",
+    "ext-curl": "*"
+  },
+  "autoload": {
+    "psr-4": {
+      "Curl\\": "src/Curl"
+    }
+  }
+}
