@@ -7,6 +7,9 @@ interface CurlInterface
     const PATTERN_JSON = '/^(?:application|text)\/(?:[a-z]+(?:[\.-][0-9a-z]+){0,}[\+\.]|x-)?json(?:-[a-z]+)?/i';
     const PATTERN_XML = '~^(?:text/|application/(?:atom\+|rss\+)?)xml~i';
     const PATTERN_SET_COOKIE = '/^Set-Cookie:\s*([^=]+)=([^;]+)/mi';
+
+    const DECODER_JSON = 'json';
+    const DECODER_XML = 'xml';
     
     const PROPERTY_EFFECTIVE_URL = 'effectiveUrl';
     const PROPERTY_TOTAL_TIME = 'totalTime';
@@ -23,4 +26,6 @@ interface CurlInterface
     const REQUEST_HEAD = 'HEAD';
     const REQUEST_OPTIONS = 'OPTIONS';
     const REQUEST_PATCH = 'PATCH';
+    const REQUEST_POST = 'POST';
+    const REQUEST_PUT = 'PUT';
 }

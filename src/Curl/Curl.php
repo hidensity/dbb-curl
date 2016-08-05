@@ -73,6 +73,29 @@ class Curl implements CurlInterface
     /**
      * @return void
      */
+    public function __destruct()
+    {
+        $this->close();
+    }
+
+    /**
+     * @param $name
+     * @return mixed
+     */
+    public function __get($name)
+    {
+        $return = null;
+
+        if (in_array($name, self::$deferredProperties) && (is_callable([$this, $getter = sprintf('__get%s', $name)]))) {
+            $return = $this->$name = $this->$getter;
+        }
+
+        return $return;
+    }
+
+    /**
+     * @return void
+     */
     public function close()
     {
         if (is_resource($this->curl)) {
@@ -112,20 +135,6 @@ class Curl implements CurlInterface
     public function error($callback)
     {
         $this->errorFunction = $callback;
-
-        return $this;
-    }
-
-    /**
-     * @param $url
-     * @param array $data
-     * @return $this
-     */
-    public function setUrl($url, $data = [])
-    {
-        $this->baseUrl = $url;
-        $this->url = $this->buildUrl($url, $data);
-        $this->setOpt(CURLOPT_URL, $this->url);
 
         return $this;
     }
@@ -215,8 +224,363 @@ class Curl implements CurlInterface
      */
     public function post($url, $data, $follow303WithPost = false)
     {
-        // TODO: implement
+        if (is_array($url)) {
+            $data = $url;
+            $url = $this->baseUrl;
+        }
+        $this->setUrl($url);
+
+        if ($follow303WithPost) {
+            $this->setOpt(CURLOPT_CUSTOMREQUEST, self::REQUEST_POST);
+        } else {
+            if (isset($this->options[CURLOPT_CUSTOMREQUEST])) {
+                if (version_compare(PHP_VERSION, '5.5.11') < 1 || defined('HHVM_VERSION')) {
+                    trigger_error('Due to technical limitations of PHP <= 5.5.11 it is not possible to perform a '
+                        . 'post-redirect-get request using Curl object that has already been used to perform other '
+                        . 'types of requests. Either use a new Curl object or update your PHP version.');
+                } else {
+                    $this->setOpt(CURLOPT_CUSTOMREQUEST, null);
+                }
+            }
+        }
+
+        $this->setOpt(CURLOPT_POST, true);
+        $this->setOpt(CURLOPT_POSTFIELDS, $this->buildPostData($data));
+
         return $this->exec();
+    }
+
+    /**
+     * @param $url
+     * @param array $data
+     * @return mixed|null
+     */
+    public function put($url, $data = [])
+    {
+        if (is_array($url)) {
+            $data = $url;
+            $url = $this->baseUrl;
+        }
+        $this->setUrl($url);
+
+        $this->setOpt(CURLOPT_CUSTOMREQUEST, self::REQUEST_PUT);
+
+        $data = $this->buildPostData($data);
+        if (empty($this->options[CURLOPT_INFILE]) && empty($this->options[CURLOPT_INFILESIZE])) {
+            $this->setHeader(self::HEADER_CONTENT_LENGTH, strlen($data));
+        }
+        if (!empty($data)) {
+            $this->setOpt(CURLOPT_POSTFIELDS, $data);
+        }
+
+        return $this->exec();
+    }
+
+    /**
+     * @param $username
+     * @param string $password
+     */
+    public function setBasicAuthentication($username, $password = '')
+    {
+        $this->setOpt(CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
+        $this->setOpt(CURLOPT_USERPWD, sprintf('%s:%s', $username, $password));
+    }
+
+    /**
+     * @param $username
+     * @param string $password
+     */
+    public function setDigestAuthentication($username, $password = '')
+    {
+        $this->setOpt(CURLOPT_HTTPAUTH, CURLAUTH_DIGEST);
+        $this->setOpt(CURLOPT_USERPWD, sprintf('%s:%s', $username, $password));
+    }
+
+    /**
+     * @param $url
+     * @param array $data
+     * @return $this
+     */
+    public function setUrl($url, $data = [])
+    {
+        $this->baseUrl = $url;
+        $this->url = $this->buildUrl($url, $data);
+        $this->setOpt(CURLOPT_URL, $this->url);
+
+        return $this;
+    }
+
+    /**
+     * @param $key
+     * @param $value
+     */
+    public function setCookie($key, $value)
+    {
+        $nameChars = [];
+        foreach (str_split($key) as $nameChar) {
+            if (!isset($this->rfc2616[$nameChar])) {
+                $nameChars[] = rawurlencode($nameChar);
+            } else {
+                $nameChars[] = $nameChar;
+            }
+        }
+
+        $valueChars = [];
+        foreach (str_split($value) as $valueChar) {
+            if (!isset($this->rfc6265[$valueChar])) {
+                $valueChars[] = rawurlencode($valueChar);
+            } else {
+                $valueChars[] = $valueChar;
+            }
+        }
+
+        $this->cookies[implode('', $nameChars)] = implode('', $valueChars);
+        $this->setOpt(CURLOPT_COOKIE, implode(';', array_map(function ($k, $v) {
+            return sprintf('%s = %s', $k, $v);
+        }, array_keys($this->cookies), array_values($this->cookies))));
+    }
+
+    /**
+     * @return array
+     */
+    public function getCookies()
+    {
+        return $this->cookies;
+    }
+
+    /**
+     * @param $key
+     * @return array|null
+     */
+    public function getCookie($key)
+    {
+        return isset($this->cookies[$key]) ? $this->cookies[$key] : null;
+    }
+
+    /**
+     * @return array
+     */
+    public function getResponseCookies()
+    {
+        return $this->responseCookies;
+    }
+
+    /**
+     * @param $key
+     * @return array|null
+     */
+    public function getResponseCookie($key)
+    {
+        return isset($this->responseCookies[$key]) ? $this->responseCookies[$key] : null;
+    }
+
+    /**
+     * @param $port
+     * @return $this
+     */
+    public function setPort($port)
+    {
+        $this->setOpt(CURLOPT_PORT, intval($port));
+
+        return $this;
+    }
+
+    /**
+     * @param $seconds
+     * @return $this
+     */
+    public function setConnectTimeout($seconds)
+    {
+        $this->setOpt(CURLOPT_CONNECTTIMEOUT, intval($seconds));
+
+        return $this;
+    }
+
+    /**
+     * @param $string
+     * @return $this
+     */
+    public function setCookieString($string)
+    {
+        $this->setOpt(CURLOPT_COOKIE, $string);
+
+        return $this;
+    }
+
+    /**
+     * @param $file
+     * @return $this
+     */
+    public function setCookieFile($file)
+    {
+        $this->setOpt(CURLOPT_COOKIEFILE, $file);
+
+        return $this;
+    }
+
+    /**
+     * @param $jar
+     * @return $this
+     */
+    public function setCookieJar($jar)
+    {
+        $this->setOpt(CURLOPT_COOKIEJAR, $jar);
+
+        return $this;
+    }
+
+    /**
+     * @return $this
+     */
+    public function setDefaultJsonDecoder()
+    {
+        $args = func_get_args();
+        $this->jsonDecoder = function ($response) use ($args) {
+            array_unshift($args, $response);
+            if (version_compare(PHP_VERSION, '5.4.0', '<')) {
+                $args = array_slice($args, 0, 3);
+            }
+
+
+            $jsonObj = call_user_func_array('json_decode', $args);
+            if (!($jsonObj === null)) {
+                $response = $jsonObj;
+            }
+
+            return $response;
+        };
+
+        return $this;
+    }
+
+    /**
+     * return $this
+     */
+    public function setDefaultXmlDecoder()
+    {
+        $this->xmlDecoder = function ($response) {
+            $xmlObj = @simplexml_load_string($response);
+            if (!($xmlObj === false)) {
+                $response = $xmlObj;
+            }
+
+            return $response;
+        };
+
+        return $this;
+    }
+
+    /**
+     * @param string $decoder
+     * @return $this
+     */
+    public function setDefaultDecoder($decoder = 'json')
+    {
+        if (is_callable($decoder)) {
+            $this->defaultDecoder = $decoder;
+        } elseif ($decoder === self::DECODER_JSON) {
+            $this->defaultDecoder = $this->jsonDecoder;
+        } elseif ($decoder === self::DECODER_XML) {
+            $this->defaultDecoder = $this->xmlDecoder;
+        }
+
+        return $this;
+    }
+
+    /**
+     * @return $this
+     */
+    public function setDefaultTimeout()
+    {
+        $this->setTimeout(self::DEFAULT_TIMEOUT);
+
+        return $this;
+    }
+
+    /**
+     * @param $seconds
+     * @return $this
+     */
+    public function setTimeout($seconds)
+    {
+        $this->setOpt(CURLOPT_TIMEOUT, intval($seconds));
+
+        return $this;
+    }
+
+    /**
+     * @return $this
+     */
+    public function setDefaultUserAgent()
+    {
+        $userAgent = sprintf(
+            'phpCurl %s (+https://nu3.de) PHP/%s cURL/%s',
+            self::VERSION,
+            PHP_VERSION,
+            curl_version()['version']
+        );
+        $this->setUserAgent($userAgent);
+
+        return $this;
+    }
+
+    /**
+     * @param $userAgent
+     * @return $this
+     */
+    public function setUserAgent($userAgent)
+    {
+        $this->setOpt(CURLOPT_USERAGENT, $userAgent);
+
+        return $this;
+    }
+
+    /**
+     * @param $decoder
+     * @return $this
+     */
+    public function setJsonDecoder($decoder)
+    {
+        if (is_callable($decoder)) {
+            $this->jsonDecoder = $decoder;
+        }
+
+        return $this;
+    }
+
+    /**
+     * @param $decoder
+     * @return $this
+     */
+    public function setXmlDecoder($decoder)
+    {
+        if (is_callable($decoder)) {
+            $this->xmlDecoder = $decoder;
+        }
+
+        return $this;
+    }
+
+    /**
+     * @param $referrer
+     * @return $this
+     */
+    public function setReferrer($referrer)
+    {
+        $this->setOpt(CURLOPT_REFERER, $referrer);
+
+        return $this;
+    }
+
+    /**
+     * @param $callback
+     * @return $this
+     */
+    public function success($callback)
+    {
+        $this->successFunction = $callback;
+        
+        return $this;
     }
 
     /**
@@ -279,6 +643,19 @@ class Curl implements CurlInterface
     }
 
     /**
+     * @param bool $on
+     * @param $output
+     */
+    public function verbose($on = true, $output = STDERR)
+    {
+        if ($on) {
+            $this->setOpt(CURLINFO_HEADER_OUT, false);
+        }
+        $this->setOpt(CURLOPT_VERBOSE, $on);
+        $this->setOpt(CURLOPT_STDERR, $output);
+    }
+
+    /**
      * @param $key
      * @param $value
      */
@@ -294,10 +671,14 @@ class Curl implements CurlInterface
 
     /**
      * @param $key
+     * @return $this
      */
     protected function unsetHeader($key)
     {
         $this->setHeader($key, '');
+        unset($this->headers[$key]);
+
+        return $this;
     }
 
     /**
@@ -593,6 +974,22 @@ class Curl implements CurlInterface
         }
 
         return implode('&', $query);
+    }
+
+    /**
+     * @return mixed
+     */
+    protected function getEffectiveUrl()
+    {
+        return $this->getInfo(CURLINFO_EFFECTIVE_URL);
+    }
+
+    /**
+     * @return mixed
+     */
+    protected function getTotalTime()
+    {
+        return $this->getInfo(CURLINFO_TOTAL_TIME);
     }
 
     /**
