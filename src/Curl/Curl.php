@@ -66,6 +66,14 @@ class Curl implements CurlInterface
         }
 
         $this->curl = curl_init();
+        $this->setDefaultUserAgent();
+        $this->setDefaultXmlDecoder();
+        $this->setDefaultTimeout();
+        $this->setOpt(CURLINFO_HEADER_OUT, true);
+        $this->setOpt(CURLOPT_HEADERFUNCTION, [$this, 'headerCallback']);
+        $this->setOpt(CURLOPT_RETURNTRANSFER, true);
+        $this->headers = new CaseInsensitiveArray();
+        $this->setUrl($baseUrl);
         $this->rfc2616 = array_fill_keys(CurlRfc::getRfc2616(), true);
         $this->rfc6265 = array_fill_keys(CurlRfc::getRfc6265(), true);
     }
@@ -107,6 +115,14 @@ class Curl implements CurlInterface
     }
 
     /**
+     * @return callable|null
+     */
+    public function getBeforeSendFunction()
+    {
+        return $this->beforeSendFunction;
+    }
+
+    /**
      * @param $callback
      * @return $this
      */
@@ -118,6 +134,14 @@ class Curl implements CurlInterface
     }
 
     /**
+     * @return callable|null
+     */
+    public function getCompleteFunction()
+    {
+        return $this->completeFunction;
+    }
+
+    /**
      * @param $callback
      * @return $this
      */
@@ -126,6 +150,14 @@ class Curl implements CurlInterface
         $this->completeFunction = $callback;
 
         return $this;
+    }
+
+    /**
+     * @return callable|null
+     */
+    public function getErrorFunction()
+    {
+        return $this->errorFunction;
     }
 
     /**
@@ -573,6 +605,14 @@ class Curl implements CurlInterface
     }
 
     /**
+     * @return callable|null
+     */
+    public function getSuccessFcuntion()
+    {
+        return $this->successFunction;
+    }
+
+    /**
      * @param $callback
      * @return $this
      */
@@ -656,10 +696,28 @@ class Curl implements CurlInterface
     }
 
     /**
+     * @param $option
+     * @param $value
+     * @return bool
+     */
+    public function setOpt($option, $value)
+    {
+        $requiredOptions = [CURLOPT_RETURNTRANSFER => self::OPT_RETURN_TRANSFER];
+
+        if (in_array($option, array_keys($requiredOptions), true) && !($value === true)) {
+            trigger_error(sprintf('%s is a required option', $requiredOptions[$option]));
+        }
+
+        $this->options[$option] = $value;
+
+        return curl_setopt($this->curl, $option, $value);
+    }
+
+    /**
      * @param $key
      * @param $value
      */
-    protected function setHeader($key, $value)
+    public function setHeader($key, $value)
     {
         $this->headers[$key] = $value;
         $headers = [];
@@ -682,10 +740,11 @@ class Curl implements CurlInterface
     }
 
     /**
+     * @param $ch
      * @param $header
      * @return int
      */
-    protected function headerCallback($header)
+    protected function headerCallback($ch, $header)
     {
         if (preg_match(self::PATTERN_SET_COOKIE, $header, $cookie) === 1) {
             $this->responseCookies[$cookie[1]] = trim($cookie[2], " \n\r\t\x0B");
@@ -898,24 +957,6 @@ class Curl implements CurlInterface
         }
 
         return $responseHeader;
-    }
-
-    /**
-     * @param $option
-     * @param $value
-     * @return bool
-     */
-    protected function setOpt($option, $value)
-    {
-        $requiredOptions = [CURLOPT_RETURNTRANSFER => self::OPT_RETURN_TRANSFER];
-
-        if (in_array($option, array_keys($requiredOptions), true) && !($value === true)) {
-            trigger_error(sprintf('%s is a required option', $requiredOptions[$option]));
-        }
-
-        $this->options[$option] = $value;
-
-        return curl_setopt($this->curl, $option, $value);
     }
 
     /**
